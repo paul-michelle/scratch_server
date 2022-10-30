@@ -1,5 +1,3 @@
-#![allow(unused_variables, dead_code)]
-
 use std::{
     collections::HashMap,
     error::Error,
@@ -27,7 +25,7 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 
 struct Worker {
     id: u8,
-    thread: JoinHandle<()>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl Worker {
@@ -38,7 +36,10 @@ impl Worker {
             println!("Worker {id} got a job!");
             job();
         }) {
-            Ok(thread) => Some(Worker { id, thread }),
+            Ok(thread) => Some(Worker {
+                id,
+                thread: Some(thread),
+            }),
             Err(_) => None,
         }
     }
@@ -73,6 +74,18 @@ impl ThreadPool {
         self.sender.send(job).unwrap();
     }
 }
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        for worker in &mut self.workers {
+            println!("Shutting down worker {}", worker.id);
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+}
+
 pub struct RequestMapper {
     mapping: HashMap<&'static str, (&'static str, &'static str)>,
 }
