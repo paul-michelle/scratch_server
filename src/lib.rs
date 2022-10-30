@@ -7,6 +7,20 @@ use std::{
     net::TcpStream,
 };
 
+pub struct ThreadPool;
+impl ThreadPool {
+    /// Create a new ThreadPool with the `size` being the max number of threads.
+    /// The `new` func will panic if the size is 0.
+    pub fn new(size: usize) -> Self {
+        assert!(size > 0);
+        ThreadPool {}
+    }
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+    }
+}
 pub struct RequestMapper {
     mapping: HashMap<&'static str, (&'static str, &'static str)>,
 }
