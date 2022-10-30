@@ -11,4 +11,6 @@ fn main() {
             lib::handle_connection(stream);
         });
     }
+
+    println!("Shutting down.")
 }

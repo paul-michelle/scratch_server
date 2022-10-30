@@ -31,11 +31,21 @@ struct Worker {
 impl Worker {
     fn new(id: u8, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Option<Self> {
         let thread_builder = thread::Builder::new();
-        match thread_builder.spawn(move || loop {
-            let job = receiver.lock().unwrap().recv().unwrap();
-            println!("Worker {id} got a job!");
-            job();
-        }) {
+        let spawned_thread = thread_builder.spawn(move || loop {
+            let msg = receiver.lock().unwrap().recv();
+            match msg {
+                Ok(job) => {
+                    println!("Worker {id} got a job! Executing...");
+                    job();
+                }
+                Err(_) => {
+                    println!("Worker {id} disconnected from channel. Shutting down...");
+                    break;
+                }
+            }
+        });
+
+        match spawned_thread {
             Ok(thread) => Some(Worker {
                 id,
                 thread: Some(thread),
@@ -47,7 +57,7 @@ impl Worker {
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
-    sender: mpsc::Sender<Job>,
+    sender: Option<mpsc::Sender<Job>>,
 }
 
 impl ThreadPool {
@@ -63,7 +73,10 @@ impl ThreadPool {
                 workers.push(worker);
             }
         }
-        Ok(ThreadPool { workers, sender })
+        Ok(ThreadPool {
+            workers,
+            sender: Some(sender),
+        })
     }
 
     pub fn execute<F>(&self, f: F)
@@ -71,12 +84,16 @@ impl ThreadPool {
         F: FnOnce() + Send + 'static,
     {
         let job = Box::new(f);
-        self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
     }
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            println!("Closing the channel's producing end.");
+            drop(sender);
+        }
         for worker in &mut self.workers {
             println!("Shutting down worker {}", worker.id);
             if let Some(thread) = worker.thread.take() {
@@ -134,12 +151,10 @@ pub fn handle_connection(mut stream: TcpStream) {
         Ok(line) => line,
         Err(_) => return,
     };
-
     let (status_line, template_name) = mapper.get(&request_line);
     let contents = Renderer::template_to_string(template_name);
     let content_length = contents.len();
     let resp = format!("{status_line}\r\nContent-Length: {content_length}\r\n\r\n{contents}");
-
     if stream.write_all(resp.as_bytes()).is_ok() {}
 }
 
