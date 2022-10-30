@@ -7,6 +7,7 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     net::TcpStream,
+    sync::{mpsc, Arc, Mutex},
     thread::{self, JoinHandle},
 };
 
@@ -22,15 +23,21 @@ impl Display for PoolCreationError {
     }
 }
 
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
 struct Worker {
     id: u8,
     thread: JoinHandle<()>,
 }
 
 impl Worker {
-    fn new(id: u8) -> Option<Self> {
+    fn new(id: u8, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Option<Self> {
         let thread_builder = thread::Builder::new();
-        match thread_builder.spawn(|| {}) {
+        match thread_builder.spawn(move || loop {
+            let job = receiver.lock().unwrap().recv().unwrap();
+            println!("Worker {id} got a job!");
+            job();
+        }) {
             Ok(thread) => Some(Worker { id, thread }),
             Err(_) => None,
         }
@@ -39,6 +46,7 @@ impl Worker {
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
+    sender: mpsc::Sender<Job>,
 }
 
 impl ThreadPool {
@@ -46,20 +54,23 @@ impl ThreadPool {
         if size == 0 {
             return Err(PoolCreationError {});
         }
-
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
         let mut workers = Vec::with_capacity(size);
         for i in 0..size {
-            if let Some(worker) = Worker::new(i as u8) {
+            if let Some(worker) = Worker::new(i as u8, Arc::clone(&receiver)) {
                 workers.push(worker);
             }
         }
-        Ok(ThreadPool { workers })
+        Ok(ThreadPool { workers, sender })
     }
 
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
     {
+        let job = Box::new(f);
+        self.sender.send(job).unwrap();
     }
 }
 pub struct RequestMapper {
