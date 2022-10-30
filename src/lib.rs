@@ -2,19 +2,60 @@
 
 use std::{
     collections::HashMap,
+    error::Error,
+    fmt::Display,
     fs,
     io::{BufRead, BufReader, Write},
     net::TcpStream,
+    thread::{self, JoinHandle},
 };
 
-pub struct ThreadPool;
-impl ThreadPool {
-    /// Create a new ThreadPool with the `size` being the max number of threads.
-    /// The `new` func will panic if the size is 0.
-    pub fn new(size: usize) -> Self {
-        assert!(size > 0);
-        ThreadPool {}
+#[derive(Debug)]
+pub struct PoolCreationError;
+impl Error for PoolCreationError {}
+impl Display for PoolCreationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to create a ThreadPool. Poolsize should be gte 1."
+        )
     }
+}
+
+struct Worker {
+    id: u8,
+    thread: JoinHandle<()>,
+}
+
+impl Worker {
+    fn new(id: u8) -> Option<Self> {
+        let thread_builder = thread::Builder::new();
+        match thread_builder.spawn(|| {}) {
+            Ok(thread) => Some(Worker { id, thread }),
+            Err(_) => None,
+        }
+    }
+}
+
+pub struct ThreadPool {
+    workers: Vec<Worker>,
+}
+
+impl ThreadPool {
+    pub fn build(size: usize) -> Result<Self, PoolCreationError> {
+        if size == 0 {
+            return Err(PoolCreationError {});
+        }
+
+        let mut workers = Vec::with_capacity(size);
+        for i in 0..size {
+            if let Some(worker) = Worker::new(i as u8) {
+                workers.push(worker);
+            }
+        }
+        Ok(ThreadPool { workers })
+    }
+
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
